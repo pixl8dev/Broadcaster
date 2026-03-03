@@ -84,6 +84,10 @@ public class StandaloneLoggerImpl extends SimpleTerminalConsole implements Logge
                     info("Dumping session responses to 'lastSessionResponse.json' and 'currentSessionResponse.json'");
                     StandaloneMain.sessionManager.dumpSession();
                 }
+                case "unfollowall" -> {
+                    info("Queueing removal of all friends from the primary session...");
+                    StandaloneMain.sessionManager.unfollowAllFriends();
+                }
                 case "accounts" -> {
                     if (args.length == 0) {
                         warn("Usage:");
@@ -105,6 +109,7 @@ public class StandaloneLoggerImpl extends SimpleTerminalConsole implements Logge
                     info("exit - Exit the application");
                     info("restart - Restart the application");
                     info("dumpsession - Dump the current session to json files");
+                    info("unfollowall - Remove all friends from the primary session account");
                     info("accounts list - List sub-accounts");
                     info("accounts add <sub-session-id> - Add a sub-account");
                     info("accounts remove <sub-session-id> - Remove a sub-account");

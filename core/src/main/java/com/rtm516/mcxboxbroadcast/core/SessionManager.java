@@ -6,6 +6,7 @@ import com.rtm516.mcxboxbroadcast.core.exceptions.SessionCreationException;
 import com.rtm516.mcxboxbroadcast.core.exceptions.SessionUpdateException;
 import com.rtm516.mcxboxbroadcast.core.models.session.CreateSessionRequest;
 import com.rtm516.mcxboxbroadcast.core.models.session.CreateSessionResponse;
+import com.rtm516.mcxboxbroadcast.core.models.session.FollowerResponse;
 import com.rtm516.mcxboxbroadcast.core.notifications.NotificationManager;
 import com.rtm516.mcxboxbroadcast.core.storage.StorageManager;
 import org.java_websocket.util.NamedThreadFactory;
@@ -283,6 +284,36 @@ public class SessionManager extends SessionManagerCore {
         for (String message : messages) {
             coreLogger.info(message);
         }
+    }
+
+    /**
+     * Queue removing all friends from the primary session account.
+     */
+    public void unfollowAllFriends() {
+        scheduledThreadPool.execute(() -> {
+            List<FollowerResponse.Person> friends;
+            try {
+                friends = friendManager().get();
+            } catch (Exception e) {
+                coreLogger.error("Failed to load friend list for unfollowall", e);
+                return;
+            }
+
+            int queued = 0;
+            for (FollowerResponse.Person friend : friends) {
+                if (!friend.isFollowedByCaller) {
+                    continue;
+                }
+
+                friendManager().remove(friend.xuid, friend.gamertag);
+                queued++;
+            }
+
+            coreLogger.info("Queued " + queued + " friends for removal from primary session.");
+            if (queued > 0) {
+                coreLogger.info("Removal is processed in batches and may take time due to Xbox rate limits.");
+            }
+        });
     }
 
     /**

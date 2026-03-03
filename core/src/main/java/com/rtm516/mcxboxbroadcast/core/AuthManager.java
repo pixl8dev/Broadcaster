@@ -14,6 +14,9 @@ import net.raphimc.minecraftauth.msa.service.impl.DeviceCodeMsaAuthService;
 import net.raphimc.minecraftauth.util.MinecraftAuth4To5Migrator;
 import net.raphimc.minecraftauth.util.holder.listener.BasicChangeListener;
 import net.raphimc.minecraftauth.util.http.exception.InformativeHttpRequestException;
+import net.raphimc.minecraftauth.xbl.data.XblConstants;
+import net.raphimc.minecraftauth.xbl.model.XblXstsToken;
+import net.raphimc.minecraftauth.xbl.request.XblXstsAuthorizeRequest;
 
 import java.io.IOException;
 import java.util.function.Consumer;
@@ -25,6 +28,7 @@ public class AuthManager {
 
     private BedrockAuthManager authManager;
     private Runnable onDeviceTokenRefreshCallback;
+    private XblXstsToken xboxLiveXstsToken;
 
     private String gamertag;
     private String xuid;
@@ -49,6 +53,7 @@ public class AuthManager {
      */
     private void initialise() {
         HttpClient httpClient = MinecraftAuth.createHttpClient();
+        xboxLiveXstsToken = null;
 
         // Try to load xboxToken from cache.json if is not already loaded
         if (authManager == null) {
@@ -74,6 +79,13 @@ public class AuthManager {
                 }
             } catch (Exception e) {
                 logger.error("Failed to load cache.json", e);
+                // The cached schema can become incompatible across auth library updates.
+                // Clearing it avoids getting stuck in a parse-fail loop on each startup.
+                try {
+                    storageManager.cache("");
+                } catch (IOException clearException) {
+                    logger.debug("Failed to clear invalid cache.json: " + clearException.getMessage());
+                }
             }
         }
 
@@ -116,7 +128,7 @@ public class AuthManager {
     private void refreshTokens() throws IOException, AgeVerificationException {
         try {
             // Requesting up-to-date tokens will automatically refresh them if expired
-            authManager.getXboxLiveXstsToken().getUpToDate();
+            authManager.getRealmsXstsToken().getUpToDate();
             authManager.getPlayFabToken().getUpToDate();
             updateProfileInfo();
         } catch (InformativeHttpRequestException e) {
@@ -132,12 +144,47 @@ public class AuthManager {
         HttpClient httpClient = MinecraftAuth.createHttpClient();
 
         try {
-            XblUsersMeProfileRequest.Response response = httpClient.executeAndHandle(new XblUsersMeProfileRequest(authManager.getXboxLiveXstsToken().getUpToDate()));
+            XblUsersMeProfileRequest.Response response = httpClient.executeAndHandle(new XblUsersMeProfileRequest(getXboxLiveXstsToken()));
             XblUsersMeProfileRequest.Response.ProfileUser profileUser = response.profileUsers().get(0);
             gamertag = profileUser.settings().get("Gamertag");
             xuid = profileUser.id();
         } catch (IOException e) {
             logger.error("Failed to get Xbox profile info", e);
+        }
+    }
+
+    private XblXstsToken getXboxLiveXstsToken() throws IOException {
+        if (authManager == null) {
+            initialise();
+        }
+
+        if (xboxLiveXstsToken != null && !xboxLiveXstsToken.isExpired()) {
+            return xboxLiveXstsToken;
+        }
+
+        HttpClient httpClient = MinecraftAuth.createHttpClient();
+        try {
+            xboxLiveXstsToken = httpClient.executeAndHandle(new XblXstsAuthorizeRequest(
+                authManager.getXblDeviceToken().getUpToDate(),
+                authManager.getXblUserToken().getUpToDate(),
+                authManager.getXblTitleToken().getUpToDate(),
+                XblConstants.XBL_XSTS_RELYING_PARTY
+            ));
+            return xboxLiveXstsToken;
+        } catch (Exception e) {
+            if (e instanceof IOException ioException) {
+                throw ioException;
+            }
+            throw new IOException("Failed to refresh Xbox LIVE XSTS token", e);
+        }
+    }
+
+    public String getTokenHeader() {
+        try {
+            return getXboxLiveXstsToken().getAuthorizationHeader();
+        } catch (IOException e) {
+            logger.error("Failed to get auth header", e);
+            return "";
         }
     }
 

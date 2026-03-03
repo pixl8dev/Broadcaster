@@ -224,7 +224,7 @@ public abstract class SessionManagerCore {
         BedrockAuthManager manager = getAuthManager();
         String token;
         try {
-            token = manager.getXboxLiveXstsToken().getUpToDate().getAuthorizationHeader();
+            token = authManager.getTokenHeader();
         } catch (Exception e) {
              throw new SessionCreationException("Failed to get authorization headers: " + e.getMessage());
         }
@@ -384,12 +384,7 @@ public abstract class SessionManagerCore {
      * @return The formatted XBL3.0 authentication header
      */
     public String getTokenHeader() {
-        try {
-            return getAuthManager().getXboxLiveXstsToken().getUpToDate().getAuthorizationHeader();
-        } catch (Exception e) {
-            logger.error("Failed to get auth header", e);
-            return "";
-        }
+        return authManager.getTokenHeader();
     }
 
     /**

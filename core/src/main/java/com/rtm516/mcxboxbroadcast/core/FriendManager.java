@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Future;
@@ -393,8 +394,9 @@ public class FriendManager {
                     } else if (response.statusCode() == 400) {
                         FriendModifyResponse modifyResponse = Constants.GSON.fromJson(response.body(), FriendModifyResponse.class);
                         if (modifyResponse.code() == 1028) {
+                            toAdd.remove(entry.getKey());
                             logger.error("Friend list full, unable to add " + entry.getValue() + " (" + entry.getKey() + ") as a friend");
-                            break;
+                            continue;
                         }
 
                         logger.warn("Failed to add " + entry.getValue() + " (" + entry.getKey() + ") as a friend: (" + response.statusCode() + ") " + response.body());
@@ -408,6 +410,7 @@ public class FriendManager {
                         // 1049 - Target user privacy settings do not allow friend requests to be received.
 
                         if (modifyResponse.code() == 1028) {
+                            toAdd.remove(entry.getKey());
                             logger.error("Friend list full, unable to add " + entry.getValue() + " (" + entry.getKey() + ") as a friend");
                         } else if (modifyResponse.code() == 1011 || modifyResponse.code() == 1049) {
                             // The friend wasn't added successfully so remove them from the list
@@ -550,8 +553,21 @@ public class FriendManager {
 
             // Parse and extract the xuids
             HttpResponse<String> response = httpClient.send(friendRequests, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                logger.debug("Failed to get pending friend requests: (" + response.statusCode() + ") " + response.body());
+                return;
+            }
+
             FriendRequestResponse friendRequestResponse = Constants.GSON.fromJson(response.body(), FriendRequestResponse.class);
-            List<String> xuids = friendRequestResponse.people.stream().map(person -> person.xuid).collect(Collectors.toUnmodifiableList());
+            if (friendRequestResponse == null || friendRequestResponse.people == null || friendRequestResponse.people.isEmpty()) {
+                return;
+            }
+
+            List<String> xuids = friendRequestResponse.people.stream()
+                .filter(Objects::nonNull)
+                .map(person -> person.xuid)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toUnmodifiableList());
 
             // Don't try and accept if there are no requests
             if (xuids.isEmpty()) {
@@ -567,18 +583,31 @@ public class FriendManager {
 
             // Parse the response
             HttpResponse<String> acceptResponse = httpClient.send(acceptRequests, HttpResponse.BodyHandlers.ofString());
+            if (acceptResponse.statusCode() != 200) {
+                logger.debug("Failed to accept friend requests: (" + acceptResponse.statusCode() + ") " + acceptResponse.body());
+                return;
+            }
+
             FriendRequestAcceptResponse friendRequestAcceptResponse = Constants.GSON.fromJson(acceptResponse.body(), FriendRequestAcceptResponse.class);
+            if (friendRequestAcceptResponse == null || friendRequestAcceptResponse.updatedPeople == null || friendRequestAcceptResponse.updatedPeople.isEmpty()) {
+                return;
+            }
+
+            Map<String, FollowerResponse.Person> friendMap = friendRequestResponse.people.stream()
+                .filter(Objects::nonNull)
+                .filter(person -> person.xuid != null)
+                .collect(Collectors.toMap(person -> person.xuid, person -> person, (existing, replacement) -> existing));
 
             // Let the user know we accepted the friend requests
             for (String xuid : friendRequestAcceptResponse.updatedPeople) {
-                Optional<FollowerResponse.Person> friend = friendRequestResponse.people.stream().filter(p -> p.xuid.equals(xuid)).findFirst();
-                if (friend.isEmpty()) {
+                FollowerResponse.Person friend = friendMap.get(xuid);
+                if (friend == null) {
                     continue;
                 }
-                logger.info("Added " + friend.get().gamertag + " (" + xuid + ") as a friend");
+                logger.info("Added " + friend.gamertag + " (" + xuid + ") as a friend");
                 sendInvite(xuid);
             }
-        } catch (IOException | InterruptedException e) {
+        } catch (JsonParseException | IOException | InterruptedException e) {
             logger.error("Failed to accept friend requests", e);
         }
     }

@@ -685,8 +685,8 @@ public class FriendManager {
      *
      * @param xuid The XUID of the user to invite
      */
-    public void sendInvite(String xuid) {
-        sendInvite(xuid, false);
+    public boolean sendInvite(String xuid) {
+        return sendInvite(xuid, false);
     }
 
     /**
@@ -695,10 +695,10 @@ public class FriendManager {
      * @param xuid The XUID of the user to invite
      * @param force If true, send even when automatic initial invites are disabled
      */
-    public void sendInvite(String xuid, boolean force) {
+    public boolean sendInvite(String xuid, boolean force) {
         // Only invite if enabled
         if (!initialInvite && !force) {
-            return;
+            return false;
         }
 
         try {
@@ -722,9 +722,19 @@ public class FriendManager {
                 .build();
 
             HttpResponse<String> inviteResponse = httpClient.send(sendInvite, HttpResponse.BodyHandlers.ofString());
-            logger.debug(inviteResponse.body());
+            boolean success = inviteResponse.statusCode() >= 200 && inviteResponse.statusCode() < 300;
+            if (!success) {
+                logger.debug("Failed to send invite to " + xuid + ": (" + inviteResponse.statusCode() + ") " + inviteResponse.body());
+            } else {
+                logger.debug(inviteResponse.body());
+            }
+            return success;
         } catch (IOException | InterruptedException e) {
             logger.error("Failed to send invite to " + xuid + ": " + e.getMessage());
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return false;
         }
     }
 }

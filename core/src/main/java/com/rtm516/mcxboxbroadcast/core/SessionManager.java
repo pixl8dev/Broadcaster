@@ -459,8 +459,12 @@ public class SessionManager extends SessionManagerCore {
                                 gamertag = "Unknown";
                             }
 
-                            friendManager().sendInvite(friend.xuid, true);
-                            coreLogger.info("Sent invite to " + gamertag + " (" + friend.xuid + ")");
+                            boolean success = friendManager().sendInvite(friend.xuid, true);
+                            if (success) {
+                                coreLogger.info("Sent invite to " + gamertag + " (" + friend.xuid + ")");
+                            } else {
+                                coreLogger.warn("Failed to send invite to " + gamertag + " (" + friend.xuid + ")");
+                            }
                         }
                     } finally {
                         if (lastBatch) {

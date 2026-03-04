@@ -87,6 +87,7 @@ For the extension version prefix with `/mcxboxbroadcast`
 | `exit` (Standalone Only) | Exits the program |
 | `restart` | Restarts the tool |
 | `dumpsession` | Dumps the current session data to files for debugging |
+| `unfriendinactive <days> [--include-no-history]` | Unfriends followed players whose last join is older than `<days>`; optional flag also includes players without history |
 | `notifyfriends` | Sends invites to followed friends in batches of 10 every 5 seconds |
 | `debugexpiry [period] [limit]` | Shows players already expired or expiring soon for inactivity auto-unfriend (for example `debugexpiry 7d 25`) |
 | `accounts list` | Lists the accounts that are currently in use and their followers count |

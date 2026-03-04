@@ -86,6 +86,37 @@ public class MCXboxBroadcastExtension implements Extension {
 
         event.register(Command.builder(this)
             .source(CommandSource.class)
+            .name("unfriendinactive")
+            .description("Remove followed friends who are inactive for X days.")
+            .executor((source, command, args) -> {
+                if (!source.isConsole()) {
+                    source.sendMessage("This command can only be ran from the console.");
+                    return;
+                }
+
+                if (args.length < 1 || args.length > 2) {
+                    source.sendMessage("Usage: unfriendinactive <days> [--include-no-history]");
+                    source.sendMessage("Example: unfriendinactive 30 --include-no-history");
+                    return;
+                }
+
+                boolean includeNoHistory = false;
+                if (args.length == 2) {
+                    if ("--include-no-history".equalsIgnoreCase(args[1])) {
+                        includeNoHistory = true;
+                    } else {
+                        source.sendMessage("Unknown flag: " + args[1]);
+                        source.sendMessage("Supported flags: --include-no-history");
+                        return;
+                    }
+                }
+
+                sessionManager.unfollowInactiveFriends(args[0], includeNoHistory);
+            })
+            .build());
+
+        event.register(Command.builder(this)
+            .source(CommandSource.class)
             .name("debugexpiry")
             .description("List players due to be removed for inactivity.")
             .executor((source, command, args) -> {

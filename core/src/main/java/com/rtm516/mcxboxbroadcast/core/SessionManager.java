@@ -323,6 +323,90 @@ public class SessionManager extends SessionManagerCore {
     }
 
     /**
+     * Queue removing followed friends who haven't joined within the provided day threshold.
+     *
+     * @param daysArg Number of inactivity days
+     */
+    public void unfollowInactiveFriends(String daysArg) {
+        unfollowInactiveFriends(daysArg, false);
+    }
+
+    /**
+     * Queue removing followed friends who haven't joined within the provided day threshold.
+     *
+     * @param daysArg Number of inactivity days
+     * @param includeNoHistory If true, remove followed friends that have no stored join history
+     */
+    public void unfollowInactiveFriends(String daysArg, boolean includeNoHistory) {
+        if (daysArg == null || daysArg.isBlank()) {
+            coreLogger.warn("Usage: unfriendinactive <days> [--include-no-history]");
+            return;
+        }
+
+        int days;
+        try {
+            days = Integer.parseInt(daysArg);
+        } catch (NumberFormatException e) {
+            coreLogger.warn("Invalid days value: " + daysArg + ". Use a positive whole number.");
+            return;
+        }
+
+        if (days <= 0) {
+            coreLogger.warn("Days must be greater than 0.");
+            return;
+        }
+
+        final int thresholdDays = days;
+        scheduledThreadPool.execute(() -> {
+            List<FollowerResponse.Person> friends;
+            Map<String, Instant> history;
+            try {
+                friends = friendManager().get();
+                history = storageManager().playerHistory().all();
+            } catch (Exception e) {
+                coreLogger.error("Failed to load data for unfriendinactive", e);
+                return;
+            }
+
+            Instant cutoff = Instant.now().minusSeconds(TimeUnit.DAYS.toSeconds(thresholdDays));
+            int queued = 0;
+            int skippedNoHistory = 0;
+
+            for (FollowerResponse.Person friend : friends) {
+                if (!friend.isFollowedByCaller) {
+                    continue;
+                }
+
+                Instant lastSeen = history.get(friend.xuid);
+                if (lastSeen == null) {
+                    if (includeNoHistory) {
+                        friendManager().remove(friend.xuid, friend.gamertag);
+                        queued++;
+                    } else {
+                        skippedNoHistory++;
+                    }
+                    continue;
+                }
+
+                if (!lastSeen.isAfter(cutoff)) {
+                    friendManager().remove(friend.xuid, friend.gamertag);
+                    queued++;
+                }
+            }
+
+            coreLogger.info("Queued " + queued + " inactive friend(s) for removal using threshold " + thresholdDays + " day(s).");
+            if (skippedNoHistory > 0) {
+                coreLogger.info("Skipped " + skippedNoHistory + " friend(s) with no join history.");
+            } else if (includeNoHistory) {
+                coreLogger.info("Included friends with no join history.");
+            }
+            if (queued > 0) {
+                coreLogger.info("Removal is processed in batches and may take time due to Xbox rate limits.");
+            }
+        });
+    }
+
+    /**
      * Send invites to all followed friends in controlled batches.
      * Batching is fixed to 10 invites every 5 seconds to avoid aggressive bursts.
      */

@@ -88,6 +88,26 @@ public class StandaloneLoggerImpl extends SimpleTerminalConsole implements Logge
                     info("Queueing removal of all friends from the primary session...");
                     StandaloneMain.sessionManager.unfollowAllFriends();
                 }
+                case "unfriendinactive", "unfollowinactive" -> {
+                    if (args.length < 1 || args.length > 2) {
+                        warn("Usage: unfriendinactive <days> [--include-no-history]");
+                        warn("Example: unfriendinactive 30 --include-no-history");
+                        return;
+                    }
+
+                    boolean includeNoHistory = false;
+                    if (args.length == 2) {
+                        if ("--include-no-history".equalsIgnoreCase(args[1])) {
+                            includeNoHistory = true;
+                        } else {
+                            warn("Unknown flag: " + args[1]);
+                            warn("Supported flags: --include-no-history");
+                            return;
+                        }
+                    }
+
+                    StandaloneMain.sessionManager.unfollowInactiveFriends(args[0], includeNoHistory);
+                }
                 case "notifyfriends" -> {
                     info("Queueing invite notifications to followed friends...");
                     StandaloneMain.sessionManager.notifyFriends();
@@ -125,6 +145,7 @@ public class StandaloneLoggerImpl extends SimpleTerminalConsole implements Logge
                     info("restart - Restart the application");
                     info("dumpsession - Dump the current session to json files");
                     info("unfollowall - Remove all friends from the primary session account");
+                    info("unfriendinactive <days> [--include-no-history] - Remove followed friends inactive for the given days");
                     info("notifyfriends - Send invites to followed friends (batched 10 every 5 seconds)");
                     info("debugexpiry [period] [limit] - List players due to be removed for inactivity");
                     info("accounts list - List sub-accounts");

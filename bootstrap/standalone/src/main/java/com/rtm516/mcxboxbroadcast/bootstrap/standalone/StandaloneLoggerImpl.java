@@ -88,6 +88,17 @@ public class StandaloneLoggerImpl extends SimpleTerminalConsole implements Logge
                     info("Queueing removal of all friends from the primary session...");
                     StandaloneMain.sessionManager.unfollowAllFriends();
                 }
+                case "debugexpiry", "debuginactive" -> {
+                    if (args.length > 2) {
+                        warn("Usage: debugexpiry [period] [limit]");
+                        warn("Example: debugexpiry 7d 25");
+                        return;
+                    }
+
+                    String period = args.length >= 1 ? args[0] : null;
+                    String limit = args.length >= 2 ? args[1] : null;
+                    StandaloneMain.sessionManager.debugInactivityExpiry(period, limit);
+                }
                 case "accounts" -> {
                     if (args.length == 0) {
                         warn("Usage:");
@@ -110,6 +121,7 @@ public class StandaloneLoggerImpl extends SimpleTerminalConsole implements Logge
                     info("restart - Restart the application");
                     info("dumpsession - Dump the current session to json files");
                     info("unfollowall - Remove all friends from the primary session account");
+                    info("debugexpiry [period] [limit] - List players due to be removed for inactivity");
                     info("accounts list - List sub-accounts");
                     info("accounts add <sub-session-id> - Add a sub-account");
                     info("accounts remove <sub-session-id> - Remove a sub-account");

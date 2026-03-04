@@ -87,6 +87,7 @@ For the extension version prefix with `/mcxboxbroadcast`
 | `exit` (Standalone Only) | Exits the program |
 | `restart` | Restarts the tool |
 | `dumpsession` | Dumps the current session data to files for debugging |
+| `debugexpiry [period] [limit]` | Shows players already expired or expiring soon for inactivity auto-unfriend (for example `debugexpiry 7d 25`) |
 | `accounts list` | Lists the accounts that are currently in use and their followers count |
 | `accounts add <sub-session-id>` | Adds an account to the list of accounts to use |
 | `accounts remove <sub-session-id>` | Removes an account from the list of accounts to use |

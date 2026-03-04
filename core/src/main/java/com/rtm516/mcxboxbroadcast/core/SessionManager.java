@@ -15,13 +15,16 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Simple manager to authenticate and create sessions on Xbox
@@ -314,6 +317,189 @@ public class SessionManager extends SessionManagerCore {
                 coreLogger.info("Removal is processed in batches and may take time due to Xbox rate limits.");
             }
         });
+    }
+
+    /**
+     * Debug inactivity expiry behaviour by listing players that are already expired
+     * or due to expire in a target window.
+     *
+     * @param periodArg Window to include, e.g. 12h, 7d (default unit is days)
+     * @param limitArg Max number of results to print
+     */
+    public void debugInactivityExpiry(String periodArg, String limitArg) {
+        if (friendSyncConfig == null) {
+            coreLogger.warn("Friend sync is not initialized yet.");
+            return;
+        }
+
+        Long periodSeconds = parsePeriodToSeconds(periodArg);
+        if (periodArg != null && !periodArg.isBlank() && periodSeconds == null) {
+            coreLogger.warn("Invalid period: " + periodArg + ". Use <number>[s|m|h|d], e.g. 12h or 7d.");
+            return;
+        }
+
+        int limit = 25;
+        if (limitArg != null && !limitArg.isBlank()) {
+            try {
+                limit = Integer.parseInt(limitArg);
+                if (limit <= 0) {
+                    coreLogger.warn("Limit must be greater than 0.");
+                    return;
+                }
+            } catch (NumberFormatException e) {
+                coreLogger.warn("Invalid limit: " + limitArg + ". Use a positive whole number.");
+                return;
+            }
+        }
+
+        if (periodSeconds == null) {
+            periodSeconds = TimeUnit.DAYS.toSeconds(Math.max(1, friendSyncConfig.expiry().days()));
+        }
+        long resolvedPeriodSeconds = periodSeconds;
+        int resolvedLimit = limit;
+
+        scheduledThreadPool.execute(() -> debugInactivityExpiryInternal(resolvedPeriodSeconds, resolvedLimit));
+    }
+
+    private void debugInactivityExpiryInternal(long periodSeconds, int limit) {
+        CoreConfig.FriendSyncConfig.ExpiryConfig expiryConfig = friendSyncConfig.expiry();
+        Instant now = Instant.now();
+        Instant windowEnd = now.plusSeconds(periodSeconds);
+
+        coreLogger.info("Inactivity debug:");
+        coreLogger.info(" - Expiry enabled: " + expiryConfig.enabled());
+        coreLogger.info(" - Expiry threshold: " + expiryConfig.days() + " day(s)");
+        coreLogger.info(" - Expiry check interval: " + expiryConfig.check() + "s");
+        coreLogger.info(" - Window: " + formatDuration(periodSeconds) + " (until " + windowEnd + ")");
+
+        List<FriendManager.InactivityExpiryCandidate> candidates;
+        try {
+            candidates = friendManager().inactivityExpiryCandidates(expiryConfig.days());
+        } catch (IOException e) {
+            coreLogger.error("Failed to load inactivity debug data", e);
+            return;
+        }
+
+        if (candidates.isEmpty()) {
+            coreLogger.info("No player history entries found.");
+            return;
+        }
+
+        long expiredNow = 0;
+        long expiringInWindow = 0;
+        for (FriendManager.InactivityExpiryCandidate candidate : candidates) {
+            if (candidate.expired()) {
+                expiredNow++;
+            } else if (!candidate.expiresAt().isAfter(windowEnd)) {
+                expiringInWindow++;
+            }
+        }
+
+        coreLogger.info("Tracked players: " + candidates.size());
+        coreLogger.info("Already expired: " + expiredNow);
+        coreLogger.info("Expiring within window: " + expiringInWindow);
+
+        int shown = 0;
+        for (FriendManager.InactivityExpiryCandidate candidate : candidates) {
+            if (!candidate.expired() && candidate.expiresAt().isAfter(windowEnd)) {
+                continue;
+            }
+
+            String status;
+            if (candidate.expired()) {
+                status = "EXPIRED " + formatDuration(-candidate.secondsUntilExpiry()) + " AGO";
+            } else {
+                status = "IN " + formatDuration(candidate.secondsUntilExpiry());
+            }
+
+            coreLogger.info(
+                " - [" + status + "] " + candidate.gamertag() + " (" + candidate.xuid() + "), " +
+                    "followedByCaller=" + candidate.followedByCaller() + ", " +
+                    "lastSeen=" + candidate.lastSeen() + ", expires=" + candidate.expiresAt()
+            );
+
+            shown++;
+            if (shown >= limit) {
+                break;
+            }
+        }
+
+        if (shown == 0) {
+            coreLogger.info("No players are due within the selected window.");
+            FriendManager.InactivityExpiryCandidate next = candidates.stream()
+                .filter(candidate -> !candidate.expired())
+                .findFirst()
+                .orElse(null);
+            if (next != null) {
+                coreLogger.info(
+                    "Next expiry outside the window: " + next.gamertag() + " (" + next.xuid() + ") in " +
+                        formatDuration(next.secondsUntilExpiry()) + " at " + next.expiresAt()
+                );
+            }
+        }
+    }
+
+    private static Long parsePeriodToSeconds(String period) {
+        if (period == null || period.isBlank()) {
+            return null;
+        }
+
+        String value = period.trim().toLowerCase(Locale.ROOT);
+        long multiplier = TimeUnit.DAYS.toSeconds(1);
+        char suffix = value.charAt(value.length() - 1);
+        if (!Character.isDigit(suffix)) {
+            value = value.substring(0, value.length() - 1);
+            switch (suffix) {
+                case 's' -> multiplier = 1;
+                case 'm' -> multiplier = TimeUnit.MINUTES.toSeconds(1);
+                case 'h' -> multiplier = TimeUnit.HOURS.toSeconds(1);
+                case 'd' -> multiplier = TimeUnit.DAYS.toSeconds(1);
+                default -> {
+                    return null;
+                }
+            }
+        }
+
+        if (value.isBlank()) {
+            return null;
+        }
+
+        long amount;
+        try {
+            amount = Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+
+        if (amount <= 0) {
+            return null;
+        }
+
+        try {
+            return Math.multiplyExact(amount, multiplier);
+        } catch (ArithmeticException e) {
+            return null;
+        }
+    }
+
+    private static String formatDuration(long totalSeconds) {
+        if (totalSeconds <= 0) {
+            return "0s";
+        }
+
+        long days = totalSeconds / TimeUnit.DAYS.toSeconds(1);
+        totalSeconds %= TimeUnit.DAYS.toSeconds(1);
+        long hours = totalSeconds / TimeUnit.HOURS.toSeconds(1);
+        totalSeconds %= TimeUnit.HOURS.toSeconds(1);
+        long minutes = totalSeconds / TimeUnit.MINUTES.toSeconds(1);
+        long seconds = totalSeconds % TimeUnit.MINUTES.toSeconds(1);
+
+        List<String> parts = new ArrayList<>();
+        if (days > 0) parts.add(days + "d");
+        if (hours > 0) parts.add(hours + "h");
+        if (minutes > 0) parts.add(minutes + "m");
+        if (seconds > 0 || parts.isEmpty()) parts.add(seconds + "s");
+        return String.join(" ", parts);
     }
 
     /**

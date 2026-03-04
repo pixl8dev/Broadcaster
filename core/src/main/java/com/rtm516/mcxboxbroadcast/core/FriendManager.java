@@ -17,8 +17,10 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +42,17 @@ public class FriendManager {
     private Future<?> internalScheduledFuture;
     private boolean initialInvite;
     private boolean shouldAcceptPendingRequests = true;
+
+    public record InactivityExpiryCandidate(
+        String xuid,
+        String gamertag,
+        Instant lastSeen,
+        Instant expiresAt,
+        long secondsUntilExpiry,
+        boolean expired,
+        boolean followedByCaller
+    ) {
+    }
 
     public FriendManager(HttpClient httpClient, Logger logger, SessionManagerCore sessionManager) {
         this.httpClient = httpClient;
@@ -277,6 +290,61 @@ public class FriendManager {
                 logger.error("Failed to clean up friends list", e);
             }
         }, 10, friendSyncConfig.expiry().check(), TimeUnit.SECONDS);
+    }
+
+    /**
+     * Builds a sorted snapshot of inactivity expiry state for all tracked players.
+     *
+     * @param expiryDays The inactivity threshold in days
+     * @return Sorted list of candidates by earliest expiry
+     * @throws IOException If player history cannot be loaded
+     */
+    public List<InactivityExpiryCandidate> inactivityExpiryCandidates(int expiryDays) throws IOException {
+        long expirySeconds = TimeUnit.DAYS.toSeconds(expiryDays);
+        Instant now = Instant.now();
+
+        Map<String, FollowerResponse.Person> friendMap = new HashMap<>();
+        for (FollowerResponse.Person person : lastFriendCache()) {
+            friendMap.put(person.xuid, person);
+        }
+
+        List<InactivityExpiryCandidate> candidates = new ArrayList<>();
+        for (Map.Entry<String, Instant> entry : sessionManager.storageManager().playerHistory().all().entrySet()) {
+            String xuid = entry.getKey();
+            Instant lastSeen = entry.getValue();
+            if (xuid == null || lastSeen == null) {
+                continue;
+            }
+
+            FollowerResponse.Person person = friendMap.get(xuid);
+            String gamertag = "Unknown";
+            boolean followedByCaller = false;
+            if (person != null) {
+                if (person.gamertag != null && !person.gamertag.isBlank()) {
+                    gamertag = person.gamertag;
+                } else if (person.displayName != null && !person.displayName.isBlank()) {
+                    gamertag = person.displayName;
+                }
+                followedByCaller = person.isFollowedByCaller;
+            }
+
+            Instant expiresAt = lastSeen.plusSeconds(expirySeconds);
+            long secondsUntilExpiry = Duration.between(now, expiresAt).getSeconds();
+            boolean expired = !expiresAt.isAfter(now);
+
+            candidates.add(new InactivityExpiryCandidate(
+                xuid,
+                gamertag,
+                lastSeen,
+                expiresAt,
+                secondsUntilExpiry,
+                expired,
+                followedByCaller
+            ));
+        }
+
+        candidates.sort(Comparator.comparing(InactivityExpiryCandidate::expiresAt));
+        return candidates;
     }
 
     /**

@@ -72,6 +72,28 @@ public class MCXboxBroadcastExtension implements Extension {
 
         event.register(Command.builder(this)
             .source(CommandSource.class)
+            .name("debugexpiry")
+            .description("List players due to be removed for inactivity.")
+            .executor((source, command, args) -> {
+                if (!source.isConsole()) {
+                    source.sendMessage("This command can only be ran from the console.");
+                    return;
+                }
+
+                if (args.length > 2) {
+                    source.sendMessage("Usage: debugexpiry [period] [limit]");
+                    source.sendMessage("Example: debugexpiry 7d 25");
+                    return;
+                }
+
+                String period = args.length >= 1 ? args[0] : null;
+                String limit = args.length >= 2 ? args[1] : null;
+                sessionManager.debugInactivityExpiry(period, limit);
+            })
+            .build());
+
+        event.register(Command.builder(this)
+            .source(CommandSource.class)
             .name("accounts")
             .description("Manage sub-accounts.")
             .executor((source, command, args) -> {

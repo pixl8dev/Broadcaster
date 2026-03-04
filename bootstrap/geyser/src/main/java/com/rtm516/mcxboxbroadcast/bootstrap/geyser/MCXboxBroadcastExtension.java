@@ -72,6 +72,20 @@ public class MCXboxBroadcastExtension implements Extension {
 
         event.register(Command.builder(this)
             .source(CommandSource.class)
+            .name("notifyfriends")
+            .description("Send invites to followed friends in batches.")
+            .executor((source, command, args) -> {
+                if (!source.isConsole()) {
+                    source.sendMessage("This command can only be ran from the console.");
+                    return;
+                }
+
+                sessionManager.notifyFriends();
+            })
+            .build());
+
+        event.register(Command.builder(this)
+            .source(CommandSource.class)
             .name("debugexpiry")
             .description("List players due to be removed for inactivity.")
             .executor((source, command, args) -> {

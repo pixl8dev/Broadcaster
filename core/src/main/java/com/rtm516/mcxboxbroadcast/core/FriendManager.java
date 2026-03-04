@@ -686,8 +686,18 @@ public class FriendManager {
      * @param xuid The XUID of the user to invite
      */
     public void sendInvite(String xuid) {
+        sendInvite(xuid, false);
+    }
+
+    /**
+     * Send an invite to a given xuid for the current game session
+     *
+     * @param xuid The XUID of the user to invite
+     * @param force If true, send even when automatic initial invites are disabled
+     */
+    public void sendInvite(String xuid, boolean force) {
         // Only invite if enabled
-        if (!initialInvite) {
+        if (!initialInvite && !force) {
             return;
         }
 

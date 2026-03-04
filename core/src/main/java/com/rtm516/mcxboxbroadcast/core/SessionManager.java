@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Simple manager to authenticate and create sessions on Xbox
@@ -32,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 public class SessionManager extends SessionManagerCore {
     private final ScheduledExecutorService scheduledThreadPool;
     private final Map<String, SubSessionManager> subSessionManagers;
+    private final AtomicBoolean notifyFriendsInProgress;
 
     private CoreConfig.FriendSyncConfig friendSyncConfig;
     private Runnable restartCallback;
@@ -47,6 +49,7 @@ public class SessionManager extends SessionManagerCore {
         super(storageManager, notificationManager, logger.prefixed("Primary Session"));
         this.scheduledThreadPool = Executors.newScheduledThreadPool(5, new NamedThreadFactory("MCXboxBroadcast Thread"));
         this.subSessionManagers = new HashMap<>();
+        this.notifyFriendsInProgress = new AtomicBoolean(false);
     }
 
     @Override
@@ -315,6 +318,73 @@ public class SessionManager extends SessionManagerCore {
             coreLogger.info("Queued " + queued + " friends for removal from primary session.");
             if (queued > 0) {
                 coreLogger.info("Removal is processed in batches and may take time due to Xbox rate limits.");
+            }
+        });
+    }
+
+    /**
+     * Send invites to all followed friends in controlled batches.
+     * Batching is fixed to 10 invites every 5 seconds to avoid aggressive bursts.
+     */
+    public void notifyFriends() {
+        if (!notifyFriendsInProgress.compareAndSet(false, true)) {
+            coreLogger.warn("A notifyfriends run is already in progress.");
+            return;
+        }
+
+        scheduledThreadPool.execute(() -> {
+            List<FollowerResponse.Person> friends;
+            try {
+                friends = friendManager().get();
+            } catch (Exception e) {
+                coreLogger.error("Failed to load friend list for notifyfriends", e);
+                notifyFriendsInProgress.set(false);
+                return;
+            }
+
+            List<FollowerResponse.Person> recipients = friends.stream()
+                .filter(friend -> friend != null && friend.xuid != null && friend.isFollowedByCaller)
+                .toList();
+
+            if (recipients.isEmpty()) {
+                coreLogger.info("No followed friends found to notify.");
+                notifyFriendsInProgress.set(false);
+                return;
+            }
+
+            final int batchSize = 10;
+            final int batchDelaySeconds = 5;
+            int total = recipients.size();
+            int totalBatches = (int) Math.ceil((double) total / batchSize);
+
+            coreLogger.info("Queueing invites to " + total + " friend(s) in " + totalBatches + " batch(es) of " + batchSize + " every " + batchDelaySeconds + "s.");
+
+            for (int batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+                int fromIndex = batchIndex * batchSize;
+                int toIndex = Math.min(fromIndex + batchSize, total);
+                List<FollowerResponse.Person> batch = recipients.subList(fromIndex, toIndex);
+                int batchNumber = batchIndex + 1;
+                boolean lastBatch = batchNumber == totalBatches;
+
+                scheduledThreadPool.schedule(() -> {
+                    try {
+                        coreLogger.info("Sending invite batch " + batchNumber + "/" + totalBatches + " (" + batch.size() + " friend(s))");
+                        for (FollowerResponse.Person friend : batch) {
+                            String gamertag = friend.gamertag != null && !friend.gamertag.isBlank() ? friend.gamertag : friend.displayName;
+                            if (gamertag == null || gamertag.isBlank()) {
+                                gamertag = "Unknown";
+                            }
+
+                            friendManager().sendInvite(friend.xuid, true);
+                            coreLogger.info("Sent invite to " + gamertag + " (" + friend.xuid + ")");
+                        }
+                    } finally {
+                        if (lastBatch) {
+                            notifyFriendsInProgress.set(false);
+                            coreLogger.info("notifyfriends completed.");
+                        }
+                    }
+                }, (long) batchIndex * batchDelaySeconds, TimeUnit.SECONDS);
             }
         });
     }
